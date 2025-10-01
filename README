@@ -1,0 +1,25 @@
+Ahorita lo estoy corriendo en el entorno MSYS, Pero para hacer 
+la sincronizacion de mensajes tiene que ser por colas no por pibes
+eso hay que cambiarlo, ya que solo funciona con Linux nativo,
+quiza hay que descargar Linux Mint a ver si ahi funcinoa eso 
+de la cola de mensajes que nos enseño el profe y quitar los piebs
+
+
+
+PRUEBAS PARA texto_largo.txt
+
+./mygrep_final "amor|guerra" texto_largo.txt 4
+
+./mygrep_fixed "Linux|Windows|macOS" texto_largo.txt 4
+
+./mygrep_fixed "Google|Apple|Microsoft|IBM" texto_largo.txt 4
+
+
+
+PRUEBAS PARA DonQuijote.txt
+
+
+
+
+
+
