@@ -1,2 +1,2 @@
 num_processes,total_time,cpu_time,min_block_time,max_block_time,throughput_MB_s,efficiency_percent
-2,0.143556,0.199307,0.000352,0.001195,13.68,29.46
+1000,10.446423,2.689047,0.001289,0.045644,0.20,2.82
