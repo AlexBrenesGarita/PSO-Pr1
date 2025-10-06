@@ -1,3 +1,42 @@
+/*
+------------------------------------------------------------
+Instituto Tecnológico de Costa Rica
+Escuela de Computación
+Curso: IC600 - Principios de Sistemas Operativos
+
+PROYECTO 1
+Autora: María Félix Méndez Abarca – 2022438535
+Autor: Alexander Brenes Garita - 2018191805
+------------------------------------------------------------
+
+Descripción general:
+Este proyecto implementa una versión multiproceso del programa grep,
+diseñada para realizar búsquedas eficientes de expresiones regulares
+sobre archivos de gran tamaño.
+
+El sistema utiliza un conjunto de procesos hijos que trabajan de forma
+colaborativa, comunicándose mediante estructuras de mensajes para
+solicitar, procesar y reportar bloques de texto de 8192 bytes.
+
+Durante la ejecución, el proceso padre asigna secciones del archivo,
+coordina las lecturas y consolida los resultados en archivos CSV que
+contienen métricas de rendimiento y tiempos de ejecución.
+
+Ejecución del programa:
+./grep "palabra1|palabra2|palabra3" archivo.txt N
+
+Donde:
+- "palabra1|palabra2|palabra3" → expresión regular a buscar.
+- archivo.txt → archivo de texto a analizar.
+- N → número de procesos a crear.
+
+Este enfoque permite analizar el impacto del paralelismo y comprender
+los mecanismos de creación, comunicación y sincronización entre procesos
+en sistemas operativos.
+------------------------------------------------------------
+
+
+*/
 //-------------------------------------
 //            INCLUDES
 //-------------------------------------
@@ -10,7 +49,6 @@
 #include <time.h>
 #include <regex.h>
 #include <sys/time.h>
-#include <sys/ipc.h>
 #include <sys/msg.h>
 
 //-------------------------------------
