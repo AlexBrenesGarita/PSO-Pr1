@@ -9,8 +9,9 @@
 #include <string.h>
 #include <time.h>
 #include <regex.h>
-#include <sys/time.h> 
-
+#include <sys/time.h>
+#include <sys/ipc.h>
+#include <sys/msg.h>
 
 //-------------------------------------
 //            DEFINES
@@ -41,6 +42,12 @@ struct message {
     off_t bytes_processed;
     struct timeval start_time;
     struct timeval end_time;
+};
+
+// Estructura para cola de mensajes
+struct msgbuf {
+    long mtype;          // Tipo de mensaje (pid del hijo o constante)
+    struct message msg;
 };
 
 //-------------------------------------
@@ -116,21 +123,21 @@ int main(int argc, char *argv[]) {
         exit(EXIT_FAILURE);
     }
 
-    //Compilar regex 
+    // Compilar regex
     regex_t regex;
     if (regcomp(&regex, pattern, REG_EXTENDED | REG_ICASE) != 0) {
         fprintf(stderr, "Error al compilar regex\n");
         exit(EXIT_FAILURE);
     }
 
-    //Tamaño del archivo
+    // Tamaño del archivo
     FILE *file = fopen(filename, "r");
     if (!file) { perror("fopen"); exit(EXIT_FAILURE); }
     fseek(file, 0, SEEK_END);
     off_t file_size = ftell(file);
     fclose(file);
 
-    //Se crean lo logs
+    // Crear logs
     FILE *log_file = fopen("grep_log.csv", "w");
     fprintf(log_file, "pid,start_pos,end_pos,process_time,total_time,lines_found,bytes_processed,block_size\n");
     fclose(log_file);
@@ -144,10 +151,10 @@ int main(int argc, char *argv[]) {
         fclose(summary);
     }
 
-    //Pipes 
-    int request_pipe[2], assign_pipe[2];
-    pipe(request_pipe);
-    pipe(assign_pipe);
+    // Crear cola de mensajes
+    key_t key = ftok("grep_log.csv", 'B');
+    int msqid = msgget(key, IPC_CREAT | 0666);
+    if (msqid == -1) { perror("msgget"); exit(EXIT_FAILURE); }
 
     struct stats stats = {0};
     gettimeofday(&stats.start_time, NULL);
@@ -160,28 +167,28 @@ int main(int argc, char *argv[]) {
             //-------------------------------------
             //            HIJOS
             //-------------------------------------
-            close(request_pipe[0]);
-            close(assign_pipe[1]);
-
             FILE *fp = fopen(filename, "r");
             if (!fp) exit(EXIT_FAILURE);
 
             while (1) {
-                struct message msg;
-                msg.type = REQUEST_WORK;
-                msg.pid = getpid();
-                write(request_pipe[1], &msg, sizeof(msg));
+                // Solicitar trabajo
+                struct msgbuf request;
+                request.mtype = 1;
+                request.msg.type = REQUEST_WORK;
+                request.msg.pid = getpid();
+                msgsnd(msqid, &request, sizeof(request.msg), 0);
 
-                if (read(assign_pipe[0], &msg, sizeof(msg)) != sizeof(msg))
-                    break;
+                // Recibir asignación
+                struct msgbuf assign;
+                msgrcv(msqid, &assign, sizeof(assign.msg), getpid(), 0);
 
-                if (msg.type == FINISH_WORK) {
+                if (assign.msg.type == FINISH_WORK) {
                     printf("[HIJO %d] Finalizando\n", getpid());
                     break;
                 }
 
-                off_t start = msg.start_pos;
-                off_t end = msg.end_pos;
+                off_t start = assign.msg.start_pos;
+                off_t end = assign.msg.end_pos;
                 size_t toread = end - start;
 
                 char buffer[BUFFER_SIZE + 1];
@@ -204,23 +211,23 @@ int main(int argc, char *argv[]) {
 
                 gettimeofday(&t2, NULL);
 
-                struct message res;
-                res.type = REPORT_RESULT;
-                res.pid = getpid();
-                res.start_pos = start;
-                res.end_pos = end;
-                res.lines_found = lines;
-                res.bytes_processed = n;
-                res.start_time = t1;
-                res.end_time = t2;
-                res.process_time = time_diff(t1, t2);
+                // Reportar resultado
+                struct msgbuf res;
+                res.mtype = 1;
+                res.msg.type = REPORT_RESULT;
+                res.msg.pid = getpid();
+                res.msg.start_pos = start;
+                res.msg.end_pos = end;
+                res.msg.lines_found = lines;
+                res.msg.bytes_processed = n;
+                res.msg.start_time = t1;
+                res.msg.end_time = t2;
+                res.msg.process_time = time_diff(t1, t2);
 
-                write(request_pipe[1], &res, sizeof(res));
+                msgsnd(msqid, &res, sizeof(res.msg), 0);
             }
 
             fclose(fp);
-            close(request_pipe[1]);
-            close(assign_pipe[0]);
             regfree(&regex);
             exit(EXIT_SUCCESS);
         } else {
@@ -231,48 +238,47 @@ int main(int argc, char *argv[]) {
     //-------------------------------------
     //            PADRE
     //-------------------------------------
-    close(request_pipe[1]);
-    close(assign_pipe[0]);
-
     off_t next_pos = 0;
     int finished = 0;
 
     FILE *log = fopen("grep_log.csv", "a");
 
     while (finished < num_proc) {
-        struct message msg;
-        ssize_t r = read(request_pipe[0], &msg, sizeof(msg));
-        if (r != sizeof(msg)) continue;
+        struct msgbuf msg;
+        ssize_t r = msgrcv(msqid, &msg, sizeof(msg.msg), 1, 0);
+        if (r != sizeof(msg.msg)) continue;
 
-        if (msg.type == REQUEST_WORK) {
+        if (msg.msg.type == REQUEST_WORK) {
             if (next_pos >= file_size) {
-                struct message fin = { .type = FINISH_WORK, .pid = msg.pid };
-                write(assign_pipe[1], &fin, sizeof(fin));
+                struct msgbuf fin;
+                fin.mtype = msg.msg.pid;
+                fin.msg.type = FINISH_WORK;
+                fin.msg.pid = msg.msg.pid;
+                msgsnd(msqid, &fin, sizeof(fin.msg), 0);
                 finished++;
             } else {
-                struct message a;
-                a.type = ASSIGN_BLOCK;
-                a.pid = msg.pid;
-                a.start_pos = next_pos;
-                a.end_pos = next_pos + BUFFER_SIZE;
-                if (a.end_pos > file_size) a.end_pos = file_size;
-                write(assign_pipe[1], &a, sizeof(a));
-                next_pos = a.end_pos;
-                printf("[PADRE] Asignando bloque %ld-%ld a %d\n", (long)a.start_pos, (long)a.end_pos, (int)a.pid);
+                struct msgbuf a;
+                a.mtype = msg.msg.pid;
+                a.msg.type = ASSIGN_BLOCK;
+                a.msg.pid = msg.msg.pid;
+                a.msg.start_pos = next_pos;
+                a.msg.end_pos = next_pos + BUFFER_SIZE;
+                if (a.msg.end_pos > file_size) a.msg.end_pos = file_size;
+                msgsnd(msqid, &a, sizeof(a.msg), 0);
+                printf("[PADRE] Asignando bloque %ld-%ld a %d\n", (long)a.msg.start_pos, (long)a.msg.end_pos, (int)a.msg.pid);
+                next_pos = a.msg.end_pos;
             }
-        } else if (msg.type == REPORT_RESULT) {
-            write_log_entry(log, &msg);
-            stats.total_time += msg.process_time;
-            stats.bytes_processed += msg.bytes_processed;
-            stats.total_matches += msg.lines_found;
-            if (msg.process_time > stats.max_time) stats.max_time = msg.process_time;
-            if (msg.process_time < stats.min_time) stats.min_time = msg.process_time;
+        } else if (msg.msg.type == REPORT_RESULT) {
+            write_log_entry(log, &msg.msg);
+            stats.total_time += msg.msg.process_time;
+            stats.bytes_processed += msg.msg.bytes_processed;
+            stats.total_matches += msg.msg.lines_found;
+            if (msg.msg.process_time > stats.max_time) stats.max_time = msg.msg.process_time;
+            if (msg.msg.process_time < stats.min_time) stats.min_time = msg.msg.process_time;
         }
     }
 
     fclose(log);
-    close(request_pipe[0]);
-    close(assign_pipe[1]);
 
     for (int i = 0; i < num_proc; i++)
         waitpid(children[i], NULL, 0);
@@ -280,6 +286,8 @@ int main(int argc, char *argv[]) {
     gettimeofday(&stats.end_time, NULL);
     analizar_rendimiento(&stats, num_proc, file_size);
 
+    // Eliminar cola de mensajes
+    msgctl(msqid, IPC_RMID, NULL);
     regfree(&regex);
     return 0;
 }
