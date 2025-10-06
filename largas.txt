@@ -1,9 +1,0 @@
-Este es un texto de ejemplo para probar el programa grep multiproceso.
-La vida es bella y llena de amor.
-La guerra nunca trae felicidad.
-El amor puede cambiar el mundo.
-La paz es el camino para la vida.
-Guerra y paz son temas universales.
-La vida, el amor y la guerra aparecen en muchos libros.
-Este archivo es suficientemente largo para probar el pool de procesos.
-Puedes agregar más líneas si lo deseas para hacer pruebas más grandes.
